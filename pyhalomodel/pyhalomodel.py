@@ -590,6 +590,221 @@ class model():
         return b_halo*integral*self.rhom
 
 
+    def bispectrum(self, k:np.ndarray, Pk_lin:np.ndarray, M:np.ndarray,
+                   sigmaM:np.ndarray, profiles:dict,
+                   beta=None, k_trunc=None, onlyEquilateral=True, verbose=False)-> tuple:
+        """
+        Computes the bispectrum given that halo model. Returns three-, two, one-halo term and sum.
+        Warning: Can only do mass-tracer right now
+        Warning: Can only do equilateral k-triangle right now
+
+        Args:
+            k (np.ndarray): Comoving wavenumbers [h/Mpc]
+            Pk_lin (np.ndarray): Linear power at each wavenumber [(Mpc/h)^3]
+            M (np.ndarray): Halo masses [Msun/h]
+            sigmaM (np.ndarray): Standard deviation of density field at scale corresponding to halo mass M
+            profiles (dict): Halo profiles from halo_profile class and corresponding field names
+            beta (_type_, optional): Optional array of beta_NL values at points M, M, k. Doesn't do anything right now. Defaults to None.
+            k_trunc (_type_, optional): None or wavenumber [h/Mpc] at which to truncate the one-halo term at large scales. Doesn't do anything right now. Defaults to None.
+            onlyEquilateral (bool, optional): Should only equilateral k-triangles be calculated? Defaults to True.
+            verbose (bool, optional): Should optional output be given? Defaults to False.
+
+        Returns:
+            tuple: 3-halo term, 2-halo term, 1-halo term, Sum (as dictionaries)
+        """
+        
+        from time import time
+        if verbose: t_start=time() # Initial time
+
+        # Checks
+        for profile in profiles.values():
+            if profile.discrete_tracer:
+                raise ValueError('Bispectrum is only implemented for mass tracer')
+            
+        if not util.is_array_monotonic(M): raise ValueError('Halo mass array must be increasing monotonically')
+        if not isinstance(profiles, dict): raise TypeError('profiles must be a dictionary')
+        for profile in profiles.values():
+            if (k != profile.k).all(): raise ValueError('k arrays must all be identical to those in profiles')
+            if (M != profile.M).all(): raise ValueError('Mass arrays must be identical to those in profiles')
+        
+        # Create arrays of R (Lagrangian radius) and nu values that correspond to the halo mass
+        nu = self._peak_height(M, sigmaM) # TODO: Raise error if nu[0] isn't << 1? or nu[-1] isn't >> 1?
+
+        # Calculate the missing halo-bias from the low-mass part of the integral
+        A = 1.-integrate.quad(lambda nu: self._mass_function_nu(nu)*self._linear_bias_nu(nu), nu[0], np.inf)[0]
+        if verbose: print('Missing halo-bias-mass from the low-mass end of the two-halo integrand:', A)
+        if A < 0.:  warnings.warn('Warning: Mass function/bias correction is negative!', RuntimeWarning)
+
+
+        # Fill arrays for results
+        Bi_3h_dict, Bi_2h_dict, Bi_1h_dict, Bi_hm_dict = {}, {}, {}, {}
+
+        if onlyEquilateral:
+            Bi_3h, Bi_2h, Bi_1h = np.zeros_like(k), np.zeros_like(k), np.zeros_like(k)
+        else:
+            raise ValueError('Right now only equilateral k are implemented')
+
+        # Loop over halo profiles/fields
+        for iu, (name_u, profile_u) in enumerate(profiles.items()): 
+            for iv, (name_v, profile_v) in enumerate(profiles.items()):
+                if iv<iu: continue
+                for iw, (name_w, profile_w) in enumerate(profiles.items()):
+                    if iw<iv: continue
+                    power_name = name_u+'-'+name_v+'-'+name_w # Name for this combination
+                    if verbose: print('Calculating bispectrum:', power_name)
+                    for ik, k1 in enumerate(k):
+                        Plin1=Pk_lin[ik]
+
+                        if onlyEquilateral:
+                            k2=k1
+                            k3=k1
+                            Plin2=Pk_lin[ik]
+                            Plin3=Pk_lin[ik]
+                            Blin=self._bispec_tree(k1, k2, k3, Plin1, Plin2, Plin3)
+                            Bi_1h[ik]=self._Bi_1h(M, nu, profile_u.Wk[ik, :], profile_v.Wk[ik, :], profile_w.Wk[ik, :])
+                            Bi_2h[ik]=self._Bi_2h(M, nu, Plin1, Plin2, Plin3, profile_u.Wk[ik, :], profile_v.Wk[ik, :], profile_w.Wk[ik, :], A)
+                            Bi_3h[ik]=self._Bi_3h(M, nu, Blin, profile_u.Wk[ik, :], profile_v.Wk[ik, :], profile_w.Wk[ik, :], A)
+                        else:
+                            raise ValueError('Right now only equilateral k are implemented')
+
+                    # Finish
+                    Bi_3h_dict[power_name], Bi_2h_dict[power_name], Bi_1h_dict[power_name] = Bi_3h.copy(), Bi_2h.copy(), Bi_1h.copy()
+                    Bi_hm_dict[power_name] = Bi_3h_dict[power_name]+Bi_2h_dict[power_name]+Bi_1h_dict[power_name]
+      
+
+        # Finish
+        if verbose:
+            t_end=time()
+            print("Bispectrum calculation time [s]:", t_end-t_start, '\n')
+
+        return Bi_3h_dict, Bi_2h_dict, Bi_1h_dict, Bi_hm_dict
+    
+
+    def _Bi_1h(self, M:np.ndarray, nu:np.ndarray, W1:float, W2:float, W3:float):
+        """One halo term of Bispectrum at specific wavenumber
+
+        Args:
+            M (np.ndarray): Halo mass [Msun/h]
+            nu (np.ndarray): Dimensionless density parameter for HMF
+            W1 (float): Value of first halo profile
+            W2 (float): Value of second halo profile
+            W3 (float): Value of third halo profile
+
+        Returns:
+            float: one-halo term of bispectrum
+        """
+        integrand=W1*W2*W3*self._mass_function_nu(nu)/M
+        Bi_1h=halo_integration(integrand, nu)
+        Bi_1h = Bi_1h*self.rhom
+        return Bi_1h
+    
+    def _Bi_2h(self, M:np.ndarray, nu:np.ndarray, Pk_lin1:float, Pk_lin2:float, Pk_lin3:float, W1:float, W2:float, W3:float, A:float):
+        """Two halo term of Bispectrum at specific wavenumber
+
+        Args:
+            M (np.ndarray): Halo mass [Msun/h]
+            nu (np.ndarray): Dimensionless density parameter for HMF
+            Pk_lin1 (float): Linear power at k1
+            Pk_lin2 (float): Linear power at k2
+            Pk_lin3 (float): Linear power at k3
+            W1 (float): Value of first halo profile
+            W2 (float): Value of second halo profile
+            W3 (float): Value of third halo profile
+            A (float): Correction for mass integral at low masses
+
+        Returns:
+            float: two halo term of bispectrum
+        """
+        Bi_2h=self._I11(M, nu, W1, A)*self._I21(M,  nu, W2, W3, A)*Pk_lin1
+        Bi_2h+=self._I11(M, nu, W2, A)*self._I21(M,  nu, W1, W3, A)*Pk_lin2
+        Bi_2h+=self._I11(M, nu, W3, A)*self._I21(M,  nu, W1, W2, A)*Pk_lin3
+
+        return Bi_2h
+    
+    def _Bi_3h(self, M:np.ndarray, nu:np.ndarray, Bk_lin:float, W1:float, W2:float, W3:float, A):
+        """Two halo term of Bispectrum at specific wavenumber
+
+        Args:
+            M (np.ndarray): Halo mass [Msun/h]
+            nu (np.ndarray): Dimensionless density parameter for HMF
+            Bk_lin (float): Linear bispectrum at k1,k2,k3
+            W1 (float): Value of first halo profile
+            W2 (float): Value of second halo profile
+            W3 (float): Value of third halo profile
+            A (float): Correction for mass integral at low masses
+
+        Returns:
+            float: three halo term of bispectrum
+        """
+        Bi_3h=self._I11(M, nu, W1, A)*self._I11(M, nu, W2, A)*self._I11(M, nu, W3, A)*Bk_lin
+        return Bi_3h
+    
+    def _I11(self, M:np.ndarray, nu:np.ndarray, W:float, A):
+        """ Halomodelintegral I_1^1 (1 halo profile + linear bias)
+
+        Args:
+            M (np.ndarray): Halo mass [Msun/h]
+            nu (np.ndarray): Dimensionless density parameter for HMF
+            W (float): Value of halo profile
+            A (_type_): Correction for mass integral at low masses
+
+        Returns:
+            float: Value of I_1^1
+        """
+        integrand=W*self._linear_bias_nu(nu)*self._mass_function_nu(nu)/M
+        I11=halo_integration(integrand, nu)
+        I11+=A*W[0]/M[0]
+        I11 = I11*self.rhom
+        return I11
+    
+
+    def _I21(self, M:np.ndarray, nu:np.ndarray, W1:float, W2:float, A:float):
+        """ Halomodelintegral I_2^1 (2 halo profiles + linear bias)
+
+        Args:
+            M (np.ndarray): Halo mass [Msun/h]
+            nu (np.ndarray): Dimensionless density parameter for HMF
+            W1 (float): Value of first halo profile
+            W1 (float): Value of second halo profile
+            A (_type_): Correction for mass integral at low masses
+
+        Returns:
+            float: Value of I_2^1
+        """
+        integrand=W1*W2*self._linear_bias_nu(nu)*self._mass_function_nu(nu)/M
+        I21=halo_integration(integrand, nu)
+        I21+=A*W1[0]*W2[0]/M[0]
+        I21 = I21*self.rhom
+        return I21
+
+
+    def _bispec_tree(self, k1:float, k2:float, k3:float, Plin1: float, Plin2: float, Plin3: float):
+        """ Treelevel Bispectrum
+
+        Args:
+            k1 (float): first wavenumber [h/Mpc]
+            k2 (float): second wavenumber [h/Mpc]
+            k3 (float): third wavenumber [h/Mpc]
+            Plin1 (float): linear power at k1
+            Plin2 (float): linear power at k2
+            Plin3 (float): linear power at k3
+
+        Returns:
+            float: Treelevel Bispectrum at k1, k2, k3
+        """
+        bispec_tree=Plin1*Plin2*self._F2(k1, k2, k3)
+        bispec_tree+=Plin1*Plin3*self._F2(k1, k3, k2)
+        bispec_tree+=Plin2*Plin3*self._F2(k2,k3,k1)
+        return 2*bispec_tree
+    
+    def _F2(self, k1:float, k2:float, k3:float):
+        """ Coupling kernel for tree-level bispectrum
+        """
+        costheta12 = 0.5 * (k3 * k3 - k1 * k1 - k2 * k2) / (k1 * k2) #angle between \vec{k1} and \vec{k2}
+        return (5. / 7.) + 0.5 * costheta12 * (k1 / k2 + k2 / k1) + (2. / 7.) * costheta12 * costheta12
+
+
+
     def _peak_height(self, M:np.ndarray, sigmaM:np.ndarray, sigma=None, Pk_lin=None) -> np.ndarray:
         '''
         Calculate peak-height (nu) values from array of halo masses

@@ -592,7 +592,7 @@ class model():
 
     def bispectrum(self, k:np.ndarray, Pk_lin:np.ndarray, M:np.ndarray,
                    sigmaM:np.ndarray, profiles:dict,
-                   beta=None, k_trunc=None, onlyEquilateral=True, verbose=False)-> tuple:
+                   beta=None, k_trunc=None, onlyEquilateral=True, fastCalc=False, verbose=False)-> tuple:
         """
         Computes the bispectrum given that halo model. Returns three-, two, one-halo term and sum.
         Warning: Can only do mass-tracer right now
@@ -607,6 +607,7 @@ class model():
             beta (_type_, optional): Optional array of beta_NL values at points M, M, k. Doesn't do anything right now. Defaults to None.
             k_trunc (_type_, optional): None or wavenumber [h/Mpc] at which to truncate the one-halo term at large scales. Doesn't do anything right now. Defaults to None.
             onlyEquilateral (bool, optional): Should only equilateral k-triangles be calculated? Defaults to True.
+            fastCalc (bool, optional): Sacrifices accuracy for faster results. Defaults to False
             verbose (bool, optional): Should optional output be given? Defaults to False.
 
         Returns:
@@ -642,7 +643,9 @@ class model():
         if onlyEquilateral:
             Bi_3h, Bi_2h, Bi_1h = np.zeros_like(k), np.zeros_like(k), np.zeros_like(k)
         else:
-            raise ValueError('Right now only equilateral k are implemented')
+            Bi_3h, Bi_2h, Bi_1h = np.zeros((len(k), len(k), len(k))), np.zeros((len(k), len(k), len(k))), np.zeros((len(k), len(k), len(k)))
+
+            #raise ValueError('Right now only equilateral k are implemented')
 
         # Loop over halo profiles/fields
         for iu, (name_u, profile_u) in enumerate(profiles.items()): 
@@ -662,10 +665,40 @@ class model():
                             Plin3=Pk_lin[ik]
                             Blin=self._bispec_tree(k1, k2, k3, Plin1, Plin2, Plin3)
                             Bi_1h[ik]=self._Bi_1h(M, nu, profile_u.Wk[ik, :], profile_v.Wk[ik, :], profile_w.Wk[ik, :])
-                            Bi_2h[ik]=self._Bi_2h(M, nu, Plin1, Plin2, Plin3, profile_u.Wk[ik, :], profile_v.Wk[ik, :], profile_w.Wk[ik, :], A)
-                            Bi_3h[ik]=self._Bi_3h(M, nu, Blin, profile_u.Wk[ik, :], profile_v.Wk[ik, :], profile_w.Wk[ik, :], A)
+                            Bi_2h[ik]=self._Bi_2h(M, nu, Plin1, Plin2, Plin3, profile_u.Wk[ik, :], profile_v.Wk[ik, :], profile_w.Wk[ik, :], A, fastCalc)
+                            Bi_3h[ik]=self._Bi_3h(M, nu, Blin, profile_u.Wk[ik, :], profile_v.Wk[ik, :], profile_w.Wk[ik, :], A, fastCalc)
                         else:
-                            raise ValueError('Right now only equilateral k are implemented')
+                            for ik2, k2 in enumerate(k):
+                                if ik2<ik: continue
+                                Plin2=Pk_lin[ik2]
+
+                                for ik3, k3 in enumerate(k):
+                                    if ik3<ik2: continue
+                                    Plin3=Pk_lin[ik3]
+                                    Blin=self._bispec_tree(k1, k2, k3, Plin1, Plin2, Plin3)
+                                    Bi_1h[ik, ik2, ik3]=self._Bi_1h(M, nu, profile_u.Wk[ik, :], profile_v.Wk[ik2, :], profile_w.Wk[ik3, :])
+                                    Bi_1h[ik, ik3, ik2]=Bi_1h[ik, ik2, ik3]
+                                    Bi_1h[ik2, ik, ik3]=Bi_1h[ik, ik2, ik3]
+                                    Bi_1h[ik2, ik3, ik]=Bi_1h[ik, ik2, ik3]
+                                    Bi_1h[ik3, ik, ik2]=Bi_1h[ik, ik2, ik3]
+                                    Bi_1h[ik3, ik2, ik]=Bi_1h[ik, ik2, ik3]
+
+
+                                    Bi_2h[ik, ik2, ik3]=self._Bi_2h(M, nu, Plin1, Plin2, Plin3, profile_u.Wk[ik, :], profile_v.Wk[ik2, :], profile_w.Wk[ik3, :], A, fastCalc)
+                                    Bi_2h[ik, ik3, ik2]=Bi_2h[ik, ik2, ik3]
+                                    Bi_2h[ik2, ik, ik3]=Bi_2h[ik, ik2, ik3]
+                                    Bi_2h[ik2, ik3, ik]=Bi_2h[ik, ik2, ik3]
+                                    Bi_2h[ik3, ik, ik2]=Bi_2h[ik, ik2, ik3]
+                                    Bi_2h[ik3, ik2, ik]=Bi_2h[ik, ik2, ik3]
+
+                                    Bi_3h[ik, ik2, ik3]=self._Bi_3h(M, nu, Blin, profile_u.Wk[ik, :], profile_v.Wk[ik2, :], profile_w.Wk[ik3, :], A, fastCalc)
+                                    Bi_3h[ik, ik3, ik2]=Bi_3h[ik, ik2, ik3]
+                                    Bi_3h[ik2, ik, ik3]=Bi_3h[ik, ik2, ik3]
+                                    Bi_3h[ik2, ik3, ik]=Bi_3h[ik, ik2, ik3]
+                                    Bi_3h[ik3, ik, ik2]=Bi_3h[ik, ik2, ik3]
+                                    Bi_3h[ik3, ik2, ik]=Bi_3h[ik, ik2, ik3]
+                            
+                            #raise ValueError('Right now only equilateral k are implemented')
 
                     # Finish
                     Bi_3h_dict[power_name], Bi_2h_dict[power_name], Bi_1h_dict[power_name] = Bi_3h.copy(), Bi_2h.copy(), Bi_1h.copy()
@@ -698,7 +731,7 @@ class model():
         Bi_1h = Bi_1h*self.rhom
         return Bi_1h
     
-    def _Bi_2h(self, M:np.ndarray, nu:np.ndarray, Pk_lin1:float, Pk_lin2:float, Pk_lin3:float, W1:float, W2:float, W3:float, A:float):
+    def _Bi_2h(self, M:np.ndarray, nu:np.ndarray, Pk_lin1:float, Pk_lin2:float, Pk_lin3:float, W1:float, W2:float, W3:float, A:float, fastCalc:bool):
         """Two halo term of Bispectrum at specific wavenumber
 
         Args:
@@ -715,13 +748,18 @@ class model():
         Returns:
             float: two halo term of bispectrum
         """
-        Bi_2h=self._I11(M, nu, W1, A)*self._I21(M,  nu, W2, W3, A)*Pk_lin1
-        Bi_2h+=self._I11(M, nu, W2, A)*self._I21(M,  nu, W1, W3, A)*Pk_lin2
-        Bi_2h+=self._I11(M, nu, W3, A)*self._I21(M,  nu, W1, W2, A)*Pk_lin3
+        if fastCalc:
+            Bi_2h=self._I21(M,  nu, W2, W3, A)*Pk_lin1
+            Bi_2h+=self._I21(M,  nu, W1, W3, A)*Pk_lin2
+            Bi_2h+=self._I21(M,  nu, W1, W2, A)*Pk_lin3
+        else:
+            Bi_2h=self._I11(M, nu, W1, A)*self._I21(M,  nu, W2, W3, A)*Pk_lin1
+            Bi_2h+=self._I11(M, nu, W2, A)*self._I21(M,  nu, W1, W3, A)*Pk_lin2
+            Bi_2h+=self._I11(M, nu, W3, A)*self._I21(M,  nu, W1, W2, A)*Pk_lin3
 
         return Bi_2h
     
-    def _Bi_3h(self, M:np.ndarray, nu:np.ndarray, Bk_lin:float, W1:float, W2:float, W3:float, A):
+    def _Bi_3h(self, M:np.ndarray, nu:np.ndarray, Bk_lin:float, W1:float, W2:float, W3:float, A:float, fastCalc:bool):
         """Two halo term of Bispectrum at specific wavenumber
 
         Args:
@@ -736,7 +774,11 @@ class model():
         Returns:
             float: three halo term of bispectrum
         """
-        Bi_3h=self._I11(M, nu, W1, A)*self._I11(M, nu, W2, A)*self._I11(M, nu, W3, A)*Bk_lin
+        if fastCalc:
+            Bi_3h=Bk_lin
+        else:
+            Bi_3h=self._I11(M, nu, W1, A)*self._I11(M, nu, W2, A)*self._I11(M, nu, W3, A)*Bk_lin
+
         return Bi_3h
     
     def _I11(self, M:np.ndarray, nu:np.ndarray, W:float, A):
@@ -771,6 +813,7 @@ class model():
         Returns:
             float: Value of I_2^1
         """
+        
         integrand=W1*W2*self._linear_bias_nu(nu)*self._mass_function_nu(nu)/M
         I21=halo_integration(integrand, nu)
         I21+=A*W1[0]*W2[0]/M[0]

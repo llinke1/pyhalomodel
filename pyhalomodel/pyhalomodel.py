@@ -42,13 +42,14 @@ eps_deriv_mf = 1e-3 # R -> dR for numerical sigma derivative
 do_I11 = True     # Compute and add low M1 and M2 portion of the integral
 do_I12_I21 = True # Compute and add low M1 or low M2 portion of the integral
 
+
 ### Class definition ###
 
 class model():
     '''
     Class for halo model
     '''
-    def __init__(self, z:float, Om_m:float, name='Tinker et al. (2010)', Dv=200., dc=1.686, verbose=False):
+    def __init__(self, z:float, Om_m:float, name='Tinker et al. (2010)', Dv=200., dc=1.686, verbose=False,eta=0):
         '''
         Class initialisation; configures mass function and halo bias.
         Args:
@@ -72,6 +73,7 @@ class model():
         self.dc = dc
         self.Dv = Dv
         self.rhom = cosmology.comoving_matter_density(Om_m) # TODO: Change name?
+        self.eta=eta
 
         # Write to screen
         if verbose:
@@ -591,7 +593,7 @@ class model():
 
 
     def bispectrum(self, k:np.ndarray, Pk_lin:np.ndarray, M:np.ndarray,
-                   sigmaM:np.ndarray, profiles:dict,
+                   sigmaM:np.ndarray, profiles:dict, kstar=0, f=0, kd=0, nd=1,
                    beta=None, k_trunc=None, onlyEquilateral=True, fastCalc=False, verbose=False)-> tuple:
         """
         Computes the bispectrum given that halo model. Returns three-, two, one-halo term and sum.
@@ -656,27 +658,49 @@ class model():
                     power_name = name_u+'-'+name_v+'-'+name_w # Name for this combination
                     if verbose: print('Calculating bispectrum:', power_name)
                     for ik, k1 in enumerate(k):
+                        Dampening_2h=1
+                        if f>0 and kd > 0 and nd>0:
+                            Dampening_2h=1-f*np.power(k1/kd, nd)/(1+np.power(k1/kd, nd))
                         Plin1=Pk_lin[ik]
+                        P1=Pk_lin[ik]*Dampening_2h
 
                         if onlyEquilateral:
                             k2=k1
                             k3=k1
+                            Dampening_1h=1
+                            if kstar>0:
+                                Dampening_1h=k1**6/kstar**6/(1+k1**6/kstar**6)
+
                             Plin2=Pk_lin[ik]
                             Plin3=Pk_lin[ik]
+                            P2=Pk_lin[ik]*Dampening_2h
+                            P3=Pk_lin[ik]*Dampening_2h
                             Blin=self._bispec_tree(k1, k2, k3, Plin1, Plin2, Plin3)
-                            Bi_1h[ik]=self._Bi_1h(M, nu, profile_u.Wk[ik, :], profile_v.Wk[ik, :], profile_w.Wk[ik, :])
-                            Bi_2h[ik]=self._Bi_2h(M, nu, Plin1, Plin2, Plin3, profile_u.Wk[ik, :], profile_v.Wk[ik, :], profile_w.Wk[ik, :], A, fastCalc)
+                            Bi_1h[ik]=self._Bi_1h(M, nu, profile_u.Wk[ik, :], profile_v.Wk[ik, :], profile_w.Wk[ik, :])*Dampening_1h
+                            
+                            
+                            Bi_2h[ik]=self._Bi_2h(M, nu, P1, P2, P3, profile_u.Wk[ik, :], profile_v.Wk[ik, :], profile_w.Wk[ik, :], A, fastCalc)
                             Bi_3h[ik]=self._Bi_3h(M, nu, Blin, profile_u.Wk[ik, :], profile_v.Wk[ik, :], profile_w.Wk[ik, :], A, fastCalc)
                         else:
                             for ik2, k2 in enumerate(k):
                                 if ik2<ik: continue
+                                if f>0 and kd > 0 and nd>0:
+                                    Dampening_2h=1-f*np.power(k2/kd, nd)/(1+np.power(k2/kd, nd))
                                 Plin2=Pk_lin[ik2]
+                                P2=Pk_lin[ik2]*Dampening_2h
 
                                 for ik3, k3 in enumerate(k):
                                     if ik3<ik2: continue
+                                    Dampening_1h=1
+                                    if kstar>0:
+                                        Dampening_1h=k1**2*k2**2*k3**2/kstar**6/(1+k1**2*k2**2*k3**2/kstar**6)
+                                    if f>0 and kd > 0 and nd>0:
+                                        Dampening_2h=1-f*np.power(k3/kd, nd)/(1+np.power(k3/kd, nd))
                                     Plin3=Pk_lin[ik3]
+                                    P3=Pk_lin[ik3]*Dampening_2h
+
                                     Blin=self._bispec_tree(k1, k2, k3, Plin1, Plin2, Plin3)
-                                    Bi_1h[ik, ik2, ik3]=self._Bi_1h(M, nu, profile_u.Wk[ik, :], profile_v.Wk[ik2, :], profile_w.Wk[ik3, :])
+                                    Bi_1h[ik, ik2, ik3]=self._Bi_1h(M, nu, profile_u.Wk[ik, :], profile_v.Wk[ik2, :], profile_w.Wk[ik3, :])*Dampening_1h
                                     Bi_1h[ik, ik3, ik2]=Bi_1h[ik, ik2, ik3]
                                     Bi_1h[ik2, ik, ik3]=Bi_1h[ik, ik2, ik3]
                                     Bi_1h[ik2, ik3, ik]=Bi_1h[ik, ik2, ik3]
@@ -684,7 +708,7 @@ class model():
                                     Bi_1h[ik3, ik2, ik]=Bi_1h[ik, ik2, ik3]
 
 
-                                    Bi_2h[ik, ik2, ik3]=self._Bi_2h(M, nu, Plin1, Plin2, Plin3, profile_u.Wk[ik, :], profile_v.Wk[ik2, :], profile_w.Wk[ik3, :], A, fastCalc)
+                                    Bi_2h[ik, ik2, ik3]=self._Bi_2h(M, nu, P1, P2, P3, profile_u.Wk[ik, :], profile_v.Wk[ik2, :], profile_w.Wk[ik3, :], A, fastCalc)
                                     Bi_2h[ik, ik3, ik2]=Bi_2h[ik, ik2, ik3]
                                     Bi_2h[ik2, ik, ik3]=Bi_2h[ik, ik2, ik3]
                                     Bi_2h[ik2, ik3, ik]=Bi_2h[ik, ik2, ik3]
@@ -1018,6 +1042,8 @@ class profile():
         else:
             _Uk = Uk.copy()
             Wk = (amplitude*Uk)/normalisation
+        #ks_bloated=np.outer(k, bloating)
+        #print(k-ks_bloated[:,0])
         profile = cls(k, M, _Uk, Wk, amplitude=amplitude, normalisation=normalisation, variance=variance, 
                       mass_tracer=mass_tracer, discrete_tracer=discrete_tracer)
         return profile

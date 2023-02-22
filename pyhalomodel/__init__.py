@@ -10,3 +10,5 @@ from .pyhalomodel import matter_profile
 from .pyhalomodel import concentration
 from .pyhalomodel import HOD_mean
 from .pyhalomodel import HOD_variance
+
+from .hmcode import BiHMCode_bispectrum

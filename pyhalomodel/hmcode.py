@@ -1,7 +1,7 @@
 import numpy as np
 import matplotlib.pyplot as plt
 #import pyhalomodel as halo
-from .pyhalomodel import model, window_function, profile, concentration
+from pyhalomodel import model, window_function, profile, concentration
 
 def BiHMCode_bispectrum(ks, Pks_lin, Ms, camb_results, Omega_m=0.3, z=0, ingredients={'hmf': 'Sheth & Tormen (1999)', 'concentration':'Duffy et al. (2008)',
                                                                'halo definition':'Mvir', 'profile':'NFW'},

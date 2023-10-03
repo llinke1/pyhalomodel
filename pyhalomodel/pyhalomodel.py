@@ -5,8 +5,8 @@ from scipy.interpolate import interp1d as interp
 import warnings
 
 # Project imports
-from . import utility as util
-from . import cosmology
+import utility as util
+import cosmology
 
 # To-do list
 # TODO: Add checks for Dv, dc value compatability with mass functions (complicated with virial definition)
@@ -1413,5 +1413,6 @@ def HOD_variance(p:np.ndarray, lam:np.ndarray, central_condition=False) -> tuple
         vss = lam # Poisson
         vcs = 0.  # No covariance
     return vcc, vss, vcs
+
 
 ### ###

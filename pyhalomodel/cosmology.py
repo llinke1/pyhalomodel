@@ -3,7 +3,7 @@ import numpy as np
 import scipy.integrate as integrate
 
 # Project imports
-from . import constants as const
+import constants as const
 
 # Constants
 Dv0 = 18.*np.pi**2 # Delta_v = ~178, EdS halo virial overdensity
